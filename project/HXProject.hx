@@ -638,7 +638,7 @@ class HXProject {
 			assets = ArrayHelper.concatUnique (assets, project.assets);
 			dependencies = ArrayHelper.concatUnique (dependencies, project.dependencies, true);
 			haxeflags = ArrayHelper.concatUnique (haxeflags, project.haxeflags);
-			haxelibs = ArrayHelper.concatUnique (haxelibs, project.haxelibs, true, "name");
+			haxelibs = mergeHaxelibs (haxelibs, project.haxelibs);
 			icons = ArrayHelper.concatUnique (icons, project.icons);
 			javaPaths = ArrayHelper.concatUnique (javaPaths, project.javaPaths, true);
 			libraries = ArrayHelper.concatUnique (libraries, project.libraries, true);
@@ -650,6 +650,36 @@ class HXProject {
 			
 		}
 		
+	}
+	
+	
+	public static function mergeHaxelibs (libs1:Array<Haxelib>, libs2:Array<Haxelib>):Array<Haxelib>
+	{
+		var libs = ArrayHelper.concatUnique (libs1, libs2, true, "name");
+		
+		var n = 0;
+		while (n < libs.length)
+		{
+			var lib = libs[n];
+			
+			if (lib.version == "")
+			{
+				for (m in 0 ... libs.length)
+				{
+					var lib2 = libs[m];
+					if (lib2.name == lib.name && lib2.version != "")
+					{
+						libs.remove(lib);
+						n -= 1;
+						break;
+					}
+				}
+			}
+			
+			n += 1;
+		}
+		
+		return libs;
 	}
 	
 	
@@ -877,6 +907,12 @@ class HXProject {
 		
 		var compilerFlags = [];
 		
+		var libVersions = new Map<String, String>();
+		for (haxelib in haxelibs) {
+			libVersions[haxelib.name] = haxelib.version;
+		}
+		var includedLibs = new Map<String, Bool>();
+		
 		for (haxelib in haxelibs) {
 			
 			var name = haxelib.name;
@@ -908,38 +944,45 @@ class HXProject {
 				arg = StringTools.trim (arg);
 				
 				if (arg != "") {
-					
-					if (!StringTools.startsWith (arg, "-")) {
+				
+					if (StringTools.startsWith (arg, "-D ") && arg.indexOf ("=") == -1) {
 						
-						if (compilerFlags.indexOf ("-cp " + arg) == -1) {
-							
-							compilerFlags.push ("-cp " + arg);
-							
-						}
+						var haxelib = new Haxelib (arg.substr (3));
 						
-					} else {
+						if (!includedLibs.exists(haxelib.name))
+						{
 						
-						if (StringTools.startsWith (arg, "-D ") && arg.indexOf ("=") == -1) {
+							var path:String;
 							
-							var haxelib = new Haxelib (arg.substr (3));
-							var path = PathHelper.getHaxelib (haxelib);
+							if (libVersions.exists(haxelib.name) && libVersions[haxelib.name] != "")
+							{
+								haxelib.version = libVersions[haxelib.name];
+								path = PathHelper.getHaxelib (haxelib);
+							} else {
+								path = PathHelper.getHaxelib (haxelib);
+								haxelib.version = getHaxelibVersion (haxelib);
+							}
 							
 							if (path != null) {
 								
-								compilerFlags = ArrayHelper.concatUnique (compilerFlags, [ "-D " + haxelib.name + "=" + getHaxelibVersion (haxelib) ], true);
+								compilerFlags.push ("-cp " + path);
 								
+								compilerFlags = ArrayHelper.concatUnique (compilerFlags, [ "-D " + haxelib.name + "=" + haxelib.version ], true);
+								
+								libVersions.remove(haxelib.name);
 							}
 							
-						} else if (!StringTools.startsWith (arg, "-L")) {
-							
-							compilerFlags = ArrayHelper.concatUnique (compilerFlags, [ arg ], true);
-							
+							includedLibs[haxelib.name] = true;
+						
 						}
 						
+					} else if (StringTools.startsWith (arg, "-") && !StringTools.startsWith (arg, "-L")) {
+						
+						compilerFlags = ArrayHelper.concatUnique (compilerFlags, [ arg ], true);
+						
 					}
-					
-				}
 				
+				}
 			}
 			
 			#else
